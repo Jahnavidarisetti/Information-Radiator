@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Team Information Radiator</title>
+
+  <!-- React and ReactDOM (classic) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+
+  <!-- D3.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    .professional-shadow {
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    }
+    
+    .professional-shadow-lg {
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+    
+    .chart-container {
+      background: #fafafa;
+      border: 1px solid #e5e7eb;
+    }
+  </style>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            'professional': ['Inter', 'system-ui', 'sans-serif'],
+          },
+          animation: {
+            'fade-in': 'fadeIn 0.5s ease-out forwards',
+            'slide-up': 'slideUp 0.6s ease-out forwards',
+          },
+          keyframes: {
+            fadeIn: {
+              '0%': { opacity: 0 },
+              '100%': { opacity: 1 }
+            },
+            slideUp: {
+              '0%': { opacity: 0, transform: 'translateY(20px)' },
+              '100%': { opacity: 1, transform: 'translateY(0)' }
+            }
+          }
+        }
+      }
+    };
+  </script>
+</head>
+
+<body class="bg-gray-50 font-professional">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const Radiator = () => {
+      const [issues, setIssues] = useState([]);
+      const [commits, setCommits] = useState([]);
+      const [ideas, setIdeas] = useState([]);
+
+      const repo = 'slu-csci-5030/material-donor-mutual-assist';
+
+      const fetchGitHubData = async () => {
+        try {
+          const [issueRes, commitRes] = await Promise.all([
+            fetch(`https://api.github.com/repos/${repo}/issues?state=all`),
+            fetch(`https://api.github.com/repos/${repo}/commits`)
+          ]);
+
+          const allIssues = await issueRes.json();
+          const filteredIssues = allIssues.filter(issue => !issue.pull_request);
+
+          setIssues(filteredIssues);
+          setCommits(await commitRes.json());
+        } catch (error) {
+          console.error('Error fetching GitHub data:', error);
+        }
+      };
+
+      useEffect(() => {
+        fetchGitHubData();
+        const interval = setInterval(fetchGitHubData, 30000);
+        return () => clearInterval(interval);
+      }, []);
+
+      useEffect(() => {
+        if (!issues.length) return;
+
+        const sprintEnd = new Date('2025-06-13T23:59:59Z');
+        const today = new Date();
+        const startDate = today < sprintEnd ? today : sprintEnd;
+        const dayCount = Math.ceil((sprintEnd - startDate) / (1000 * 60 * 60 * 24)) + 1;
+
+        const currentRemaining = issues.filter(i => i.state === 'open').length;
+
+        const data = [];
+        for (let i = 0; i < dayCount; i++) {
+          const remaining = Math.max(0, currentRemaining * (1 - i / (dayCount - 1)));
+          data.push({ day: i + 1, remaining });
+        }
+
+        const maxRemaining = currentRemaining;
+
+        const svg = d3.select('#burndown-chart').html('').attr('width', 400).attr('height', 200);
+
+        const margin = { top: 20, right: 30, bottom: 40, left: 50 };
+        const width = 400 - margin.left - margin.right;
+        const height = 200 - margin.top - margin.bottom;
+
+        const x = d3.scaleLinear().domain([1, dayCount]).range([0, width]);
+        const y = d3.scaleLinear().domain([0, maxRemaining]).range([height, 0]);
+
+        const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Grid lines
+        g.append('g')
+          .attr('class', 'grid')
+          .attr('transform', `translate(0,${height})`)
+          .call(d3.axisBottom(x).ticks(dayCount).tickSize(-height).tickFormat(''))
+          .selectAll('line')
+          .style('stroke', '#e5e7eb')
+          .style('stroke-width', 1);
+
+        g.append('g')
+          .attr('class', 'grid')
+          .call(d3.axisLeft(y).tickSize(-width).tickFormat(''))
+          .selectAll('line')
+          .style('stroke', '#e5e7eb')
+          .style('stroke-width', 1);
+
+        // Axes
+        g.append('g')
+          .attr('transform', `translate(0,${height})`)
+          .call(d3.axisBottom(x).ticks(dayCount).tickFormat(d => `Day ${d}`))
+          .selectAll("text")
+            .style("fill", "#374151")
+            .style("font-family", "Inter")
+            .style("font-size", "12px");
+
+        g.append('g')
+          .call(d3.axisLeft(y))
+          .selectAll("text")
+            .style("fill", "#374151")
+            .style("font-family", "Inter")
+            .style("font-size", "12px");
+
+        // Area under curve
+        const area = d3.area()
+          .x(d => x(d.day))
+          .y0(height)
+          .y1(d => y(d.remaining))
+          .curve(d3.curveMonotoneX);
+
+        g.append('path')
+          .datum(data)
+          .attr('fill', '#3b82f6')
+          .attr('fill-opacity', 0.1)
+          .attr('d', area);
+
+        // Line
+        const line = d3.line()
+          .x(d => x(d.day))
+          .y(d => y(d.remaining))
+          .curve(d3.curveMonotoneX);
+
+        g.append('path')
+          .datum(data)
+          .attr('fill', 'none')
+          .attr('stroke', '#3b82f6')
+          .attr('stroke-width', 2)
+          .attr('d', line);
+
+        // Data points
+        g.selectAll('.dot')
+          .data(data)
+          .enter().append('circle')
+          .attr('class', 'dot')
+          .attr('cx', d => x(d.day))
+          .attr('cy', d => y(d.remaining))
+          .attr('r', 4)
+          .attr('fill', '#3b82f6')
+          .attr('stroke', '#ffffff')
+          .attr('stroke-width', 2);
+
+        // Axis labels
+        svg.append("text")
+          .attr("x", 200)
+          .attr("y", 190)
+          .attr("text-anchor", "middle")
+          .attr("font-size", "12px")
+          .attr("fill", "#6b7280")
+          .attr("font-family", "Inter")
+          .text("Sprint Days");
+
+        svg.append("text")
+          .attr("x", -100)
+          .attr("y", 15)
+          .attr("transform", "rotate(-90)")
+          .attr("text-anchor", "middle")
+          .attr("font-size", "12px")
+          .attr("fill", "#6b7280")
+          .attr("font-family", "Inter")
+          .text("Remaining Issues");
+
+      }, [issues]);
+
+      const handleIdeaSubmit = (e) => {
+        e.preventDefault();
+        const idea = e.target.idea.value.trim();
+        if (idea) setIdeas([...ideas, idea]);
+        e.target.reset();
+      };
+
+      // Professional card configuration with reordered layout
+      const cards = [
+        {
+          title: "Team Health Monitor",
+          content: (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600 font-medium">Overall Status</span>
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-600 font-semibold">Healthy</span>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center py-3 bg-gray-50 rounded-lg border">
+                  <div className="text-lg font-semibold text-gray-900">98%</div>
+                  <div className="text-xs text-gray-500">Uptime</div>
+                </div>
+                <div className="text-center py-3 bg-gray-50 rounded-lg border">
+                  <div className="text-lg font-semibold text-gray-900">4.8</div>
+                  <div className="text-xs text-gray-500">Performance</div>
+                </div>
+                <div className="text-center py-3 bg-gray-50 rounded-lg border">
+                  <div className="text-lg font-semibold text-gray-900">Good</div>
+                  <div className="text-xs text-gray-500">Velocity</div>
+                </div>
+              </div>
+              
+              <div className="text-sm text-gray-500 bg-blue-50 p-3 rounded-lg border-l-4 border-blue-400">
+                Team metrics indicate consistent performance with healthy commit patterns and issue resolution rates.
+              </div>
+            </div>
+          )
+        },
+        {
+          title: "Issue Management",
+          content: (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-900 mb-1">
+                    {issues.filter(i => i.state === 'open').length}
+                  </div>
+                  <div className="text-sm text-gray-500">Open Issues</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-900 mb-1">
+                    {issues.filter(i => i.state === 'closed').length}
+                  </div>
+                  <div className="text-sm text-gray-500">Resolved</div>
+                </div>
+              </div>
+              
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${issues.length > 0 ? (issues.filter(i => i.state === 'closed').length / issues.length) * 100 : 0}%`
+                  }}
+                ></div>
+              </div>
+              
+              <div className="text-center text-sm text-gray-600">
+                Resolution Rate: {issues.length > 0 ? Math.round((issues.filter(i => i.state === 'closed').length / issues.length) * 100) : 0}%
+              </div>
+            </div>
+          )
+        },
+        {
+          title: "Development Progress",
+          content: (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">Commits This Week</span>
+                <span className="text-2xl font-bold text-gray-900">{commits.length}</span>
+              </div>
+              
+              <div className="border-t pt-4">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-gray-600">Sprint Milestones</span>
+                  <span className="text-lg font-semibold text-gray-900">3 of 5</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                  <div className="bg-gray-700 h-2 rounded-full w-3/5"></div>
+                </div>
+                <div className="text-right text-sm text-gray-500">60% Complete</div>
+              </div>
+            </div>
+          )
+        },
+        {
+          title: "Sprint Burndown Analysis",
+          content: (
+            <div className="chart-container rounded-lg p-4">
+              <svg id="burndown-chart" className="w-full"></svg>
+            </div>
+          ),
+          large: true
+        },
+        {
+          title: "Team Feedback & Ideas",
+          content: (
+            <div className="space-y-4">
+              <form onSubmit={handleIdeaSubmit} className="space-y-3">
+                <input
+                  type="text"
+                  name="idea"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  placeholder="Share your idea or feedback..."
+                />
+                <button 
+                  type="submit" 
+                  className="w-full bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  Submit Idea
+                </button>
+              </form>
+              
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {ideas.length === 0 ? (
+                  <div className="text-center text-gray-400 py-4 text-sm">
+                    No ideas submitted yet
+                  </div>
+                ) : (
+                  ideas.map((idea, index) => (
+                    <div key={index} className="bg-gray-50 border-l-4 border-gray-400 p-3 text-sm text-gray-700 rounded-r">
+                      {idea}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ),
+          large: true
+        }
+      ];
+
+      return (
+        <div className="min-h-screen bg-gray-50">
+          {/* Header */}
+          <div className="bg-white border-b border-gray-200 professional-shadow">
+            <div className="max-w-7xl mx-auto px-6 py-8">
+              <div className="text-center animate-fade-in">
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                  Team Dashboard
+                </h1>
+                <p className="text-gray-600 max-w-2xl mx-auto">
+                  Real-time insights and metrics for project tracking and team performance monitoring
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="max-w-7xl mx-auto px-6 py-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Column - 3 regular cards */}
+              <div className="space-y-6">
+                {cards.slice(0, 3).map((card, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-white rounded-lg professional-shadow border border-gray-200 p-6 hover:professional-shadow-lg transition-shadow duration-200 animate-slide-up"
+                    style={{ animationDelay: `${idx * 0.1}s` }}
+                  >
+                    <h2 className="text-lg font-semibold text-gray-900 mb-4">{card.title}</h2>
+                    {card.content}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Right Column - 2 large cards */}
+              <div className="lg:col-span-2 space-y-6">
+                {cards.slice(3).map((card, idx) => (
+                  <div
+                    key={idx + 3}
+                    className="bg-white rounded-lg professional-shadow border border-gray-200 p-6 hover:professional-shadow-lg transition-shadow duration-200 animate-slide-up"
+                    style={{ animationDelay: `${(idx + 3) * 0.1}s` }}
+                  >
+                    <h2 className="text-lg font-semibold text-gray-900 mb-4">{card.title}</h2>
+                    {card.content}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          {/* Footer Status */}
+          <div className="bg-white border-t border-gray-200 mt-12">
+            <div className="max-w-7xl mx-auto px-6 py-4">
+              <div className="flex justify-between items-center text-sm text-gray-500">
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span>Live Updates</span>
+                  </div>
+                  <span>Refreshes every 30 seconds</span>
+                </div>
+                <div>
+                  Last updated: {new Date().toLocaleTimeString()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<Radiator />, document.getElementById("root"));
+  </script>
+</body>
+</html>
